@@ -1,0 +1,52 @@
+#! /usr/bin/env ruby
+
+require "rubygems"
+require "bundler/setup"
+
+require "newrelic_plugin"
+require "aws-sdk-core"
+
+module S3Agent
+
+  class Agent < NewRelic::Plugin::Agent::Base
+
+    agent_guid "io.adstage.newrelic-s3-plugin"
+    agent_version "1.0.1"
+    agent_config_options :region, :bucket_name, :access_key_id, :secret_access_key
+    agent_human_labels("S3") { bucket_name }
+
+    def poll_cycle
+      count = 0
+      size = 0
+      last_modified = Time.new(0)
+      s3 = Aws::S3::Client.new(
+        credentials: Aws::Credentials.new(access_key_id, secret_access_key),
+        region: region)
+      s3.list_objects(bucket: bucket_name).each do |page|
+        page.contents.each do |object|
+          count += 1
+          size += object.size.to_i
+          last_modified = [last_modified, object.last_modified].max
+        end
+      end
+      report_metric "ObjectCount", "Objects", count
+      report_metric "Size", "Bytes", size
+      report_metric "SinceLastModified", "Seconds", (Time.now - last_modified).to_i
+    end
+
+  end
+
+  #
+  # Register this agent with the component.
+  # The ExampleAgent is the name of the module that defines this
+  # driver (the module must contain at least three classes - a
+  # PollCycle, a Metric and an Agent class, as defined above).
+  #
+  NewRelic::Plugin::Setup.install_agent :s3, S3Agent
+
+  #
+  # Launch the agent; this never returns.
+  #
+  NewRelic::Plugin::Run.setup_and_run
+
+end
